@@ -1,65 +1,20 @@
 import * as XLSX from "https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs";
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.17.1/firebase-app.js";
 import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.17.1/firebase-auth.js";
-import { getFirestore, collection, query, where, getDocs } from "https://www.gstatic.com/firebasejs/12.17.1/firebase-firestore.js";
+import { getFirestore, collection, query, where, getDocs, doc, setDoc, getDoc, deleteDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/12.17.1/firebase-firestore.js";
 
-const firebaseConfig = {
-  apiKey: "AIzaSyCTz-YS4aaOS81XvDUFx3tiBISh0V7oUHo",
-  authDomain: "rh-frb.firebaseapp.com",
-  projectId: "rh-frb",
-  storageBucket: "rh-frb.firebasestorage.app",
-  messagingSenderId: "1069409309284",
-  appId: "1:1069409309284:web:cac99c3a2457eef6a58571"
-};
-
-const firebaseApp = initializeApp(firebaseConfig);
-const auth = getAuth(firebaseApp);
-const db = getFirestore(firebaseApp);
-const $ = (id) => document.getElementById(id);
-const state = { user: null, days: [] };
-
-function toMinutes(value) { if (!value) return null; const [h, m] = value.split(":").map(Number); return h * 60 + m; }
-function totalMinutes(day) { const morning = toMinutes(day.morningEnd) - toMinutes(day.morningStart); const afternoon = toMinutes(day.dayEnd) - toMinutes(day.afternoonStart); return [morning, afternoon].filter(Number.isFinite).reduce((a, b) => a + b, 0); }
-function weekInfo(value) { const d = new Date(`${value}T12:00:00`); const day = d.getDay() || 7; d.setDate(d.getDate() + 4 - day); const year = d.getFullYear(); const first = new Date(year, 0, 1); const week = Math.ceil((((d - first) / 86400000) + first.getDay() + 1) / 7); return { year, week }; }
-function dateLabel(value) { return value ? new Date(`${value}T12:00:00`).toLocaleDateString("fr-FR") : ""; }
-function show(text) { const e = $("message"); e.textContent = text; e.hidden = false; }
-
-function render() {
-  const list = $("history-list");
-  list.innerHTML = state.days.length ? state.days.map((day) => `<div class="history-row"><span><strong>${dateLabel(day.date)}</strong><br>${day.morningStart || "--:--"} / ${day.morningEnd || "--:--"} · ${day.afternoonStart || "--:--"} / ${day.dayEnd || "--:--"}<br>${day.mission || "Sans mission"} · ${day.zone || "Zone non renseignée"}</span><strong>${Math.floor(totalMinutes(day) / 60)}h${String(totalMinutes(day) % 60).padStart(2, "0")}</strong></div>`).join("") : "<p>Aucune journée enregistrée.</p>";
-}
-
-async function loadDays() {
-  if (!state.user) return;
-  const snapshot = await getDocs(query(collection(db, "timesheets"), where("uid", "==", state.user.uid)));
-  state.days = snapshot.docs.map((item) => ({ id: item.id, ...item.data() })).sort((a, b) => String(a.date).localeCompare(String(b.date)));
-  render();
-}
-
-function exportXlsx() {
-  if (!state.days.length) { show("Aucune journée à exporter."); return; }
-  const rows = state.days.map((day) => { const week = weekInfo(day.date); const minutes = totalMinutes(day); return {
-    "Semaine": `S${String(week.week).padStart(2, "0")}`,
-    "Date": day.date,
-    "Jour": new Date(`${day.date}T12:00:00`).toLocaleDateString("fr-FR", { weekday: "long" }),
-    "Début matin": day.morningStart || "",
-    "Fin matin": day.morningEnd || "",
-    "Début AM": day.afternoonStart || "",
-    "Fin journée": day.dayEnd || "",
-    "Total heures": `${Math.floor(minutes / 60)}:${String(minutes % 60).padStart(2, "0")}`,
-    "Mission": day.mission || "",
-    "Zone": day.zone || "",
-    "Équipe": day.team || "",
-    "Voiture": day.car || "",
-    "Affectation": day.assignment || ""
-  }; });
-  const sheet = XLSX.utils.json_to_sheet(rows);
-  sheet["!cols"] = [{ wch: 10 }, { wch: 14 }, { wch: 15 }, { wch: 14 }, { wch: 12 }, { wch: 12 }, { wch: 14 }, { wch: 14 }, { wch: 24 }, { wch: 24 }, { wch: 18 }, { wch: 18 }, { wch: 24 }];
-  const workbook = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(workbook, sheet, "Pointages");
-  XLSX.writeFile(workbook, `releve-heures-${new Date().toISOString().slice(0, 10)}.xlsx`);
-  show("Export XLSX généré.");
-}
-
-function init() { $("export-xlsx").addEventListener("click", exportXlsx); onAuthStateChanged(auth, async (user) => { state.user = user; $("auth-status").textContent = user ? user.email : "Non connecté"; if (user) await loadDays(); }); }
-init();
+const firebaseConfig={apiKey:"AIzaSyCTz-YS4aaOS81XvDUFx3tiBISh0V7oUHo",authDomain:"rh-frb.firebaseapp.com",projectId:"rh-frb",storageBucket:"rh-frb.firebasestorage.app",messagingSenderId:"1069409309284",appId:"1:1069409309284:web:cac99c3a2457eef6a58571"};
+const app=initializeApp(firebaseConfig),auth=getAuth(app),db=getFirestore(app),$=id=>document.getElementById(id);const fields=["morningStart","morningEnd","afternoonStart","dayEnd"];let user=null,entries=[],current={date:"",mission:"",zone:"",team:"",car:"",assignment:"",morningStart:"",morningEnd:"",afternoonStart:"",dayEnd:""};
+const isoWeek=value=>{const d=new Date(`${value}T12:00:00`),day=d.getDay()||7;d.setDate(d.getDate()+4-day);const year=d.getFullYear(),first=new Date(year,0,1);return{year,week:Math.ceil((((d-first)/86400000)+first.getDay()+1)/7)}};const fmt=n=>Number.isFinite(n)&&n>=0?`${String(Math.floor(n/60)).padStart(2,"0")}:${String(Math.round(n%60)).padStart(2,"0")}`:"00:00";const mins=v=>{if(!v)return null;const[a,b]=v.split(":").map(Number);return a*60+b};const total=x=>{const a=mins(x.morningEnd)-mins(x.morningStart),b=mins(x.dayEnd)-mins(x.afternoonStart);return[a,b].filter(Number.isFinite).reduce((s,n)=>s+n,0)};const dateFr=v=>v?new Date(`${v}T12:00:00`).toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long",year:"numeric"}):"";const today=()=>{const d=new Date(),o=d.getTimezoneOffset();return new Date(d.getTime()-o*6e4).toISOString().slice(0,10)};const weekStart=v=>{const d=new Date(`${v}T12:00:00`),day=d.getDay()||7;d.setDate(d.getDate()-day+1);return d};const sameWeek=(a,b)=>{const s=weekStart(b),e=new Date(s);e.setDate(e.getDate()+7);const d=new Date(`${a}T12:00:00`);return d>=s&&d<e};function show(t,c=""){const e=$("message");e.textContent=t;e.className=`message ${c}`;e.hidden=false}
+function weekData(date){return entries.filter(x=>sameWeek(x.date,date))}function renderWeek(){const data=weekData(current.date),s=weekStart(current.date),end=new Date(s);end.setDate(end.getDate()+6);const label=`Semaine ${String(isoWeek(current.date).week).padStart(2,"0")} · ${s.toLocaleDateString("fr-FR")} → ${end.toLocaleDateString("fr-FR")}`,sum=data.reduce((a,x)=>a+total(x),0);["day","stats"].forEach(p=>{$(`${p}-week-label`).textContent=label;$(`${p}-week-total`).textContent=fmt(sum);$(`${p}-week-days`).innerHTML=Array.from({length:7},(_,i)=>{const d=new Date(s);d.setDate(d.getDate()+i);const iso=d.toISOString().slice(0,10),x=entries.find(y=>y.date===iso);return`<div class="week-day ${x?"has":""}"><strong>${d.toLocaleDateString("fr-FR",{weekday:"short"})}</strong><span>${x?fmt(total(x)):"—"}</span></div>`}).join("")})}
+function sync(){fields.forEach(f=>{$(`${f}-view`).textContent=current[f]||"Non pointé";document.querySelector(`[data-field="${f}"]`).classList.toggle("done",!!current[f])});$("date").value=current.date;$("total").textContent=fmt(total(current));[["mission-view","mission"],["zone-view","zone"],["team-view","team"],["car-view","car"],["assignment-view","assignment"]].forEach(([a,b])=>$(a).textContent=current[b]?.trim()||"Non renseignée");const s=$("status");s.textContent=current.dayEnd?"🔵 Journée complète":current.morningStart?"🟢 Journée en cours":"⚪ En attente";s.classList.toggle("ok",!!current.morningStart);renderWeek()}
+function fill(){["mission","zone","team","car","assignment"].forEach(x=>$(x).value=current[x]||"")}
+function view(n){document.querySelectorAll("[data-view]").forEach(x=>x.classList.toggle("active",x.dataset.view===n));document.querySelectorAll("[data-nav]").forEach(x=>x.classList.toggle("active",x.dataset.nav===n))}
+function esc(v){return String(v||"").replaceAll("&","&amp;").replaceAll('"',"&quot;").replaceAll("<","&lt;").replaceAll(">","&gt;")}
+function renderHistory(){const l=$("history-list");l.innerHTML=entries.length?entries.map((x,i)=>`<article class="history-card" data-index="${i}"><div class="history-title"><div><strong>S${String(isoWeek(x.date).week).padStart(2,"0")} · ${dateFr(x.date)}</strong><div class="history-meta">Total : ${fmt(total(x))}</div></div><button class="small" data-load="${i}" type="button">Charger</button></div><div class="history-times"><label>Début matin<input type="time" data-hfield="morningStart" value="${x.morningStart||""}"></label><label>Fin matin<input type="time" data-hfield="morningEnd" value="${x.morningEnd||""}"></label><label>Début AM<input type="time" data-hfield="afternoonStart" value="${x.afternoonStart||""}"></label><label>Fin journée<input type="time" data-hfield="dayEnd" value="${x.dayEnd||""}"></label></div><div class="history-fields"><label>Mission<input data-hfield="mission" value="${esc(x.mission)}"></label><label>Zone<input data-hfield="zone" value="${esc(x.zone)}"></label><label>Équipe<input data-hfield="team" value="${esc(x.team)}"></label><label>Voiture<input data-hfield="car" value="${esc(x.car)}"></label><label>Affectation<input data-hfield="assignment" value="${esc(x.assignment)}"></label></div><div class="history-actions"><button class="small save" data-update="${i}" type="button">Enregistrer les modifications</button><button class="small" data-delete="${i}" type="button">Supprimer</button></div></article>`).join(""):"<p class=\"empty\">Aucune journée enregistrée.</p>";bindHistory()}
+function bindHistory(){document.querySelectorAll("[data-load]").forEach(b=>b.onclick=()=>{current={...entries[+b.dataset.load]};fill();sync();view("journee")});document.querySelectorAll("[data-update]").forEach(b=>b.onclick=async()=>{const i=+b.dataset.update,c=document.querySelector(`[data-index="${i}"]`),x={date:entries[i].date};c.querySelectorAll("[data-hfield]").forEach(e=>x[e.dataset.hfield]=e.value);await setDoc(doc(db,"timesheets",`${user.uid}_${x.date}`),{...x,uid:user.uid,email:user.email,totalMinutes:total(x),updatedAt:serverTimestamp()},{merge:true});await load()});document.querySelectorAll("[data-delete]").forEach(b=>b.onclick=async()=>{const i=+b.dataset.delete;if(confirm("Supprimer cette journée ?")){await deleteDoc(doc(db,"timesheets",`${user.uid}_${entries[i].date}`));await load()}})}
+async function load(){if(!user)return;const s=await getDocs(query(collection(db,"timesheets"),where("uid","==",user.uid)));entries=s.docs.map(x=>({id:x.id,...x.data()})).sort((a,b)=>String(b.date).localeCompare(String(a.date)));renderHistory();const x=entries.find(e=>e.date===current.date);if(x){current={...current,...x};fill();sync()}renderWeek();$("stats-days").textContent=entries.length;const all=entries.reduce((a,x)=>a+total(x),0);$("stats-all").textContent=fmt(all);$("stats-average").textContent=entries.length?fmt(all/entries.length):"00:00"}
+async function save(){if(!user)return show("Connectez-vous avant d’enregistrer.","error");const id=`${user.uid}_${current.date}`,data={...current,uid:user.uid,email:user.email,totalMinutes:total(current),week:isoWeek(current.date).week,weekYear:isoWeek(current.date).year,updatedAt:serverTimestamp()};await setDoc(doc(db,"timesheets",id),data,{merge:true});await load();show("Journée enregistrée.","ok")}
+function openTime(f){const o=document.createElement("div");o.style.cssText="position:fixed;inset:0;z-index:100;background:#000b;display:grid;place-items:center;padding:20px";o.innerHTML=`<div class="panel"><h2>Modifier l’heure</h2><input id="time-edit" type="time" value="${current[f]||""}"><button class="primary" id="time-ok">Valider</button><button class="secondary" id="time-cancel">Annuler</button></div>`;document.body.append(o);o.querySelector("#time-ok").onclick=()=>{current[f]=o.querySelector("#time-edit").value;o.remove();sync()};o.querySelector("#time-cancel").onclick=()=>o.remove()}
+function exportXlsx(){if(!entries.length)return show("Aucune journée à exporter.","error");const rows=entries.map(x=>{const w=isoWeek(x.date);return{Semaine:`S${String(w.week).padStart(2,"0")}`,Date:x.date,Jour:new Date(`${x.date}T12:00:00`).toLocaleDateString("fr-FR",{weekday:"long"}),"Début matin":x.morningStart||"","Fin matin":x.morningEnd||"","Début AM":x.afternoonStart||"","Fin journée":x.dayEnd||"","Total heures":fmt(total(x)),Mission:x.mission||"",Zone:x.zone||"",Équipe:x.team||"",Voiture:x.car||"",Affectation:x.assignment||""}});const ws=XLSX.utils.json_to_sheet(rows);const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,"Pointages");XLSX.writeFile(wb,`releve-heures-${today()}.xlsx`)}
+function init(){current.date=today();fill();sync();document.querySelectorAll("[data-nav]").forEach(b=>b.onclick=()=>view(b.dataset.nav));$("edit").onclick=()=>view("parametres");$("save").onclick=save;$("duplicate").onclick=()=>{if(entries[0]){current={...entries[0],date:current.date};fill();sync()}};$("export-xlsx").onclick=exportXlsx;[["date","date"],["mission","mission"],["zone","zone"],["team","team"],["car","car"],["assignment","assignment"]].forEach(([a,b])=>$(a).oninput=e=>{current[b]=e.target.value;sync()});document.querySelectorAll("[data-field]").forEach(b=>b.onclick=()=>openTime(b.dataset.field));const times=["08:00","08:30","12:00","13:00","17:00","18:00"];$("quick").innerHTML=times.map(t=>`<button data-q="${t}" type="button">${t}</button>`).join("");let target=null;document.querySelectorAll("[data-q]").forEach(b=>b.onclick=()=>{target=target||fields.find(f=>!current[f])||"morningStart";current[target]=b.dataset.q;sync()});onAuthStateChanged(auth,async u=>{user=u;if(u)await load()})}init();
